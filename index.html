@@ -1,0 +1,1498 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ClientHello</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&family=Unbounded:wght@700;800&display=swap">
+<style>
+/* Layout: a Wireshark window. Filter and Expert Info on top, capture field with the packet on the left, packet list, details and hex on the right, status bar at the bottom */
+:root{
+  --chrome:#ECEEF2;
+  --panel:#FFFFFF;
+  --panel-2:#F6F7F9;
+  --ink:#1B1D22;
+  --muted:#5F6470;
+  --line:#CBCFD8;
+  --fin:#1679A7;
+  --row-tcp:#E7E6FF;
+  --row-udp:#DAEEFF;
+  --row-ok:#E4FFC7;
+  --row-syn:#A0A0A0;
+  --row-arp:#FAF0D7;
+  --row-xtls:#FCE0FF;
+  --row-ice:#CFE4F7;
+  --bad-bg:#12272E;
+  --bad-fg:#F78787;
+  --filter-ok:#AFFFAF;
+  --filter-bad:#FFAFAF;
+  --f-display:"Unbounded","Arial Black",system-ui,sans-serif;
+  --f-body:"Golos Text",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,Consolas,"Courier New",monospace;
+  color-scheme:light;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{background:var(--chrome)}
+body{margin:0;color:var(--ink);font-family:var(--f-body);font-size:14px;line-height:1.45;-webkit-tap-highlight-color:transparent}
+.app{max-width:1200px;margin:0 auto;padding-inline:16px;padding-block:14px 18px;display:flex;flex-direction:column;gap:8px}
+.top{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:14px;row-gap:2px}
+.brand{margin:0;font-family:var(--f-display);font-weight:800;font-size:clamp(1.35rem,3.2vw,1.75rem);letter-spacing:-.02em;line-height:1.1}
+.brand span{color:var(--fin)}
+
+.filter{display:flex;align-items:center;gap:8px;min-width:0;background:var(--filter-ok);border:1px solid #79C979;border-radius:3px;padding:5px 10px;font-family:var(--f-mono);font-size:12.5px;transition:background-color .2s}
+.filter.bad{background:var(--filter-bad);border-color:#D27878}
+.filter-k{font-family:var(--f-body);font-size:12px;color:#2C4A2C;font-weight:600;flex:none}
+.filter.bad .filter-k{color:#6B2323}
+.filter code{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+.expert{display:flex;align-items:center;gap:8px;min-height:2.6rem;background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:4px 10px;font-size:13px}
+.sev{flex:none;font-family:var(--f-mono);font-size:11px;font-weight:700;padding:1px 6px;border-radius:2px;background:#B9CDF3;color:var(--ink)}
+.expert[data-sev=error] .sev{background:#E04848;color:#FFFFFF}
+.expert[data-sev=warn] .sev{background:#F2C14E}
+.expert[data-sev=note] .sev{background:#86D5E8}
+#expertMsg{min-width:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+
+.main{display:grid;grid-template-columns:minmax(300px,420px) minmax(0,1fr);gap:10px;align-items:start}
+.left{display:flex;flex-direction:column;gap:8px;min-width:0}
+.stage{position:relative;height:clamp(460px,72vh,640px);background:#FFFFFF;border:1px solid var(--line);border-radius:3px;overflow:hidden;user-select:none;-webkit-user-select:none}
+#field{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
+
+.hud{position:absolute;top:0;left:0;right:0;display:flex;align-items:center;gap:10px;padding:6px 8px;background:rgba(255,255,255,.88);border-bottom:1px solid var(--line);font-size:12px;pointer-events:none;font-variant-numeric:tabular-nums}
+.hud-k{color:var(--muted);font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;margin-right:6px}
+.hud-item{white-space:nowrap}
+.hud-item b{font-family:var(--f-mono);font-size:13px}
+.hud-conn{display:flex;align-items:center;flex:1;min-width:0}
+.meter{flex:1;min-width:30px;height:8px;background:#E8EBF0;border-radius:4px;overflow:hidden;margin-right:8px}
+.meter i{display:block;height:100%;width:100%;background:#6DAA3C;transform:scaleX(0);transform-origin:left center;transition:transform .12s}
+.hud-conn.hot .meter i{background:#E08A2E}
+.hud-conn.frozen .meter i{background:#4E95D9}
+#hudConnTxt{min-width:0;overflow:hidden;text-overflow:ellipsis;font-family:var(--f-mono);font-size:11.5px;white-space:nowrap}
+.hud.spare .hud-conn .hud-k{display:none}
+.hud-conn.frozen #hudConnTxt{color:#1D4F86;font-weight:700}
+.chip-spare{font-family:var(--f-mono);font-size:11px;font-weight:700;background:#FCE0FF;color:#7E2A93;border:1px solid #B04FC4;border-radius:3px;padding:1px 6px;white-space:nowrap}
+
+.overlay{position:absolute;inset:0;display:flex;padding:16px;background:rgba(236,238,242,.8);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);overflow:auto}
+.dlg{width:100%;max-width:360px;background:var(--panel);border:1px solid #B9BFCB;border-radius:6px;box-shadow:0 10px 32px rgba(24,36,58,.2);overflow:hidden;margin:auto}
+.dlg-bar{background:linear-gradient(#F3F4F7,#E2E5EB);border-bottom:1px solid var(--line);padding:6px 12px;font-size:12px;color:var(--muted);display:flex;align-items:center;gap:7px}
+.dlg-bar::before{content:"";width:9px;height:9px;border-radius:50%;background:var(--fin);flex:none}
+.dlg-body{padding:14px 16px 16px;display:flex;flex-direction:column;gap:10px}
+.dlg h2{margin:0;font-family:var(--f-display);font-weight:700;font-size:1.05rem;line-height:1.3;text-wrap:balance}
+.dlg p{margin:0}
+.picks{display:flex;flex-direction:column;gap:6px}
+.pick{appearance:none;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;align-items:baseline;text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:7px 10px;font:inherit;color:var(--ink);cursor:pointer}
+.pick:hover{border-color:#9AA2B1}
+.pick b{font-family:var(--f-mono);font-size:12.5px}
+.pick kbd{grid-row:1;grid-column:2}
+.pick span{grid-column:1 / -1;font-size:12px;line-height:1.35;color:var(--muted)}
+.pick[data-tr=reality][aria-checked=true]{background:var(--row-xtls);border-color:#B04FC4}
+.pick[data-tr=tor][aria-checked=true]{background:var(--row-tcp);border-color:#7A6FC9}
+.pick[data-tr=wg][aria-checked=true]{background:var(--bad-bg);border-color:var(--bad-bg);color:var(--bad-fg)}
+.pick[data-tr=wg][aria-checked=true] span{color:#E9B3B3}
+.rules{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:7px;font-size:13px}
+.rules li{display:grid;grid-template-columns:4.8rem minmax(0,1fr);gap:10px;align-items:baseline}
+kbd{font-family:var(--f-mono);font-size:11px;background:var(--panel-2);border:1px solid var(--line);border-bottom-width:2px;border-radius:3px;padding:0 5px;white-space:nowrap;justify-self:start;color:var(--ink)}
+kbd.k-spare{background:#FCE0FF;border-color:#B04FC4;color:#7E2A93}
+kbd.k-wifi{background:#DAEEFF;border-color:#4E95D9;color:#1D4F86}
+.primary{appearance:none;border:0;border-radius:4px;background:var(--fin);color:#FFFFFF;font:600 14px/1.2 var(--f-body);padding:11px 14px;cursor:pointer}
+.primary:hover{background:#12668E}
+.secondary{appearance:none;align-self:center;background:none;border:0;padding:4px 6px;color:var(--fin);font:600 13px/1.2 var(--f-body);text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+.fine{font-size:11.5px;color:var(--muted)}
+.xrow{display:flex;gap:8px;align-items:center;font-family:var(--f-mono);font-size:11.5px;color:var(--muted)}
+.sev-chip{background:#E04848;color:#FFFFFF;font-weight:700;padding:1px 6px;border-radius:2px}
+.score{display:flex;align-items:baseline;justify-content:space-between;gap:10px;border-top:1px solid var(--line);padding-top:10px}
+.score .k{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.07em}
+.score b{font-family:var(--f-mono);font-size:1.6rem;font-variant-numeric:tabular-nums}
+.meta{font-size:12px;color:var(--muted)}
+.epitaph{font-style:italic;color:#3D4250;font-size:13px}
+.moment{font-size:13px;font-weight:600}
+.real{display:flex;flex-direction:column;gap:2px;background:#FFF8E1;border-left:3px solid #E2A400;border-radius:2px;padding:6px 9px;font-size:12px;line-height:1.4;color:#3D4250}
+.real-k{font-family:var(--f-mono);font-size:10.5px;font-weight:700;color:#7D5A00}
+#dlgOver .dlg-body{gap:8px}
+
+.controls{display:grid;grid-template-columns:1fr 1.5fr 1fr 1.4fr;gap:6px;user-select:none;-webkit-user-select:none}
+.controls button{appearance:none;min-height:52px;background:var(--panel);border:1px solid var(--line);border-radius:5px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font:600 14px/1.1 var(--f-body);color:var(--ink);cursor:pointer;touch-action:manipulation}
+.controls button:active{background:var(--row-tcp)}
+.controls kbd{font-size:10px;border:0;background:none;padding:0;color:var(--muted)}
+button:focus-visible{outline:2px solid var(--fin);outline-offset:2px}
+
+.panes{display:flex;flex-direction:column;gap:6px;min-width:0;height:calc(clamp(460px,72vh,640px) + 60px)}
+.pane{background:var(--panel);border:1px solid var(--line);border-radius:3px;min-width:0}
+.plist-wrap{flex:1;min-height:0;overflow:auto}
+.plist-wrap table{border-collapse:collapse;width:100%;font-family:var(--f-mono);font-size:11.5px;font-variant-numeric:tabular-nums}
+.plist-wrap th{position:sticky;top:0;z-index:1;background:var(--panel-2);text-align:left;font-weight:600;font-family:var(--f-body);font-size:12px;border-bottom:1px solid var(--line);padding:4px 8px;white-space:nowrap}
+.plist-wrap td{padding:1px 8px;white-space:nowrap;border-bottom:1px solid rgba(255,255,255,.55)}
+.plist-wrap .c-no,.plist-wrap .c-len{text-align:right}
+.r-tcp{background:var(--row-tcp)}
+.r-syn{background:var(--row-syn)}
+.r-udp{background:var(--row-udp)}
+.r-arp{background:var(--row-arp)}
+.r-ok{background:var(--row-ok)}
+.r-xtls{background:var(--row-xtls)}
+.r-ice{background:var(--row-ice)}
+.r-bad{background:var(--bad-bg);color:var(--bad-fg)}
+.details{padding:6px 10px;font-family:var(--f-mono);font-size:12px;display:flex;flex-direction:column;gap:2px;flex:none}
+.details div{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.details .sub{padding-left:18px;color:#2F3440}
+.hexwrap{overflow-x:auto;flex:none}
+#hex{margin:0;padding:8px 10px;font-family:var(--f-mono);font-size:12px;line-height:1.55;color:#2F3440}
+#hex .off{color:var(--muted)}
+#hex mark{background:var(--mk,#E0EAFF);color:var(--ink);border-radius:2px}
+
+.status{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:12px;color:var(--muted);border-top:1px solid var(--line);padding-top:6px;font-variant-numeric:tabular-nums}
+.status b{color:var(--ink);font-weight:600;font-family:var(--f-mono);font-size:11.5px}
+
+@media (max-width:860px){
+  .main{grid-template-columns:minmax(0,1fr)}
+  .stage{height:min(64vh,540px);min-height:400px}
+  .panes{height:auto}
+  .plist-wrap{flex:none;height:240px}
+  .plist-wrap .c-src,.plist-wrap .c-dst,.plist-wrap .c-time{display:none}
+}
+@media (max-width:420px){
+  .hud .hud-k{display:none}
+  .overlay{padding:10px}
+  #dlgOver .dlg-body{padding:12px 14px 12px;gap:6px}
+  #dlgOver h2{font-size:.98rem}
+  .score b{font-size:1.35rem}
+  .score{padding-top:6px}
+  #dlgOver p,.moment{font-size:12.5px}
+  .real{font-size:11.5px;padding:5px 8px}
+  .controls button{font-size:13px}
+}
+</style>
+
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <h1 class="brand">Client<span>Hello</span></h1>
+  </header>
+
+  <div class="filter" id="filter">
+    <span class="filter-k">Фильтр</span>
+    <code id="filterText">tls.handshake.extensions_server_name == "www.microsoft.com"</code>
+  </div>
+
+  <div class="expert" id="expert" data-sev="chat" aria-live="polite">
+    <span class="sev" id="expertSev">Chat</span>
+    <span id="expertMsg">Готов к захвату на wlan0.</span>
+  </div>
+
+  <main class="main">
+    <section class="left">
+      <div class="stage" id="stage">
+        <canvas id="field" aria-label="Игровое поле: три полосы, по которым едет пакет, и стены ТСПУ поперёк"></canvas>
+        <div class="hud">
+          <div class="hud-item"><span class="hud-k">доставлено</span><b id="hudDelivered">0 Б</b></div>
+          <div class="hud-conn" id="hudConn"><span class="hud-k">соединение</span><div class="meter"><i id="hudConnBar"></i></div><span id="hudConnTxt">0 Б / 16 КБ</span></div>
+          <span class="chip-spare" id="hudSpare" hidden>+1 конфиг</span>
+        </div>
+
+        <div class="overlay" id="overlay">
+          <div class="dlg" id="dlgTitle" role="dialog" aria-labelledby="tTitle">
+            <div class="dlg-bar">Захват · wlan0</div>
+            <div class="dlg-body">
+              <h2 id="tTitle">Ты — один пакет до YouTube.</h2>
+              <p>Напрямую нельзя: SNI youtube.com видно издалека. Дорога: дом → LTE → регион. Выбери, на чём едешь.</p>
+              <div class="picks" role="radiogroup" aria-label="На чём едешь">
+                <button class="pick" role="radio" data-tr="reality" aria-checked="true"><b>VLESS + Reality</b><kbd>1</kbd><span>Для DPI ты www.microsoft.com, сканеры тебя не видят. Но VPS на хостинге: банят по IP и морозят на 16 КБ.</span></button>
+                <button class="pick" role="radio" data-tr="tor" aria-checked="false"><b>Tor + мост</b><kbd>2</kbd><span>Мост не в бан-листах, пока не засветится. Зато сканеры DPI ловят шум, ячейка всего 498 Б и три хопа задержки.</span></button>
+                <button class="pick" role="radio" data-tr="wg" aria-checked="false"><b>WireGuard</b><kbd>3</kbd><span>Быстрый и честный. Режется всегда и везде.</span></button>
+              </div>
+              <button class="primary" id="btnStart">Отправить ClientHello</button>
+              <ul class="rules">
+                <li><kbd>← →</kbd><span>Полоса. RST объезжай. На Tor держись прохода в сканере DPI.</span></li>
+                <li><kbd>↑ / тап</kbd><span>Reality: пересядь на свободный хостинг до стены «блок по IP». Tor: возьми новый мост, если старый засветился.</span></li>
+                <li><kbd>R</kbd><span>Переподключиться, когда канал замёрз.</span></li>
+                <li><kbd class="k-spare">конфиг</kbd><span>Друг скинул новый конфиг: запасная жизнь.</span></li>
+                <li><kbd class="k-wifi">Wi-Fi</kbd><span>Спасает от белого списка. Хоп через РФ тоже, но он редкий.</span></li>
+              </ul>
+              <p class="fine" id="tBest" hidden></p>
+              <p class="fine">Enter: старт · 1–3: транспорт · P: пауза · на телефоне свайпы и кнопки под полем</p>
+            </div>
+          </div>
+
+          <div class="dlg" id="dlgOver" role="dialog" aria-labelledby="ovSummary" hidden>
+            <div class="dlg-bar">Expert Information</div>
+            <div class="dlg-body">
+              <div class="xrow"><span class="sev-chip">Error</span><span id="ovGroup">Sequence</span><span id="ovProto">TCP</span></div>
+              <h2 id="ovSummary">Соединение сброшено.</h2>
+              <div class="score"><span class="k">Доставлено</span><b id="ovDelivered">0 Б</b></div>
+              <p id="ovEquiv"></p>
+              <p class="moment" id="ovMoment" hidden></p>
+              <div class="real"><span class="real-k">pkt_comment · как в жизни</span><span id="ovReal"></span></div>
+              <p class="meta"><span id="ovBest"></span> · <span id="ovStats"></span></p>
+              <p class="epitaph" id="ovEpitaph"></p>
+              <button class="primary" id="btnAgain">Новый захват</button>
+              <button class="secondary" id="btnPick">Сменить транспорт</button>
+            </div>
+          </div>
+
+          <div class="dlg" id="dlgPause" role="dialog" aria-labelledby="pTitle" hidden>
+            <div class="dlg-bar">Захват приостановлен</div>
+            <div class="dlg-body">
+              <h2 id="pTitle">Пауза</h2>
+              <p>ТСПУ тоже ждёт. Он терпеливый.</p>
+              <button class="primary" id="btnResume">Продолжить</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="controls">
+        <button id="btnLeft" aria-label="Полоса левее"><span>◀</span><kbd>←</kbd></button>
+        <button id="btnSni" aria-label="Сменить хостинг"><span id="btnSniTxt">хостинг ⟳</span><kbd>↑ / пробел</kbd></button>
+        <button id="btnRight" aria-label="Полоса правее"><span>▶</span><kbd>→</kbd></button>
+        <button id="btnRe" aria-label="Переподключиться"><span>↻ заново</span><kbd>R</kbd></button>
+      </div>
+    </section>
+
+    <section class="panes">
+      <div class="pane plist-wrap" id="plistWrap">
+        <table>
+          <thead><tr><th class="c-no">No.</th><th class="c-time">Time</th><th class="c-src">Source</th><th class="c-dst">Destination</th><th class="c-proto">Protocol</th><th class="c-len">Length</th><th class="c-info">Info</th></tr></thead>
+          <tbody id="plist"></tbody>
+        </table>
+      </div>
+      <div class="pane details">
+        <div id="detHead">▾ TLSv1.3 Record Layer: Handshake Protocol: Client Hello</div>
+        <div class="sub" id="sniDetail">Extension: server_name</div>
+      </div>
+      <div class="pane hexwrap"><pre id="hex"></pre></div>
+    </section>
+  </main>
+
+  <footer class="status">
+    <span>Пакетов: <b id="stPackets">0</b></span>
+    <span>Доставлено: <b id="stDelivered">0 Б</b></span>
+    <span>Сеть: <b id="stNet">wlan0 · дом</b></span>
+    <span>Транспорт: <b id="stTr">Reality</b></span>
+    <span>Рекорд: <b id="stBest">0 Б</b></span>
+  </footer>
+</div>
+
+<script>
+(() => {
+'use strict';
+const $ = id => document.getElementById(id);
+const cv = $('field'), ctx = cv.getContext('2d'), stage = $('stage');
+const MONO = '"JetBrains Mono", ui-monospace, Consolas, monospace';
+const REDUCED = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+const FREEZE_AT = 16384, PY_OFF = 92, PH = 40;
+/* TSPU lane height and lead: a lane spawns above the top edge so the "ahead..." warning has time to fire */
+const BAND_H = {ban:64, bban:56, dpi:48}, LEAD_S = 1;
+const ROUTER = '192.168.1.1', HOME_IP = '192.168.1.33', LTE_IP = '100.72.14.9';
+const MS_SNI = 'www.microsoft.com';
+
+/* VPS and bridge addresses come from the RFC 5737 documentation ranges: no real servers behind them */
+const HOSTS = [
+  {name:'Hetzner',      short:'Hetzner', cc:'DE', as:'AS24940', ip:'203.0.113.24',  color:'#C8102E'},
+  {name:'DigitalOcean', short:'DigitalOcean', cc:'NL', as:'AS14061', ip:'198.51.100.61', color:'#0069FF'},
+  {name:'OVH',          short:'OVH',     cc:'FR', as:'AS16276', ip:'192.0.2.16',    color:'#B45309'},
+];
+const BRIDGES = [{ip:'198.51.100.203', port:30422}, {ip:'203.0.113.117', port:47185}, {ip:'192.0.2.88', port:9443}];
+const TRANSPORTS = {
+  reality:{id:'reality', name:'VLESS + Reality', short:'Reality',   seg:1448, hs:0.35, speedK:1,    lag:0,    freeze:true,  bans:true,  dpi:false},
+  tor:    {id:'tor',     name:'Tor + мост',      short:'Tor',       seg:498,  hs:0.8,  speedK:0.85, lag:0.16, freeze:true,  bans:false, dpi:true, color:'#59316B'},
+  wg:     {id:'wg',      name:'WireGuard',       short:'WireGuard', seg:1368, hs:0,   speedK:1.1,  lag:0,    freeze:false, bans:false, dpi:true, color:'#88171A', doomed:true},
+};
+const TR_ORDER = ['reality', 'tor', 'wg'];
+const STAGES = [
+  {name:'Дом',    net:'дом',    iface:'wlan0',       at:0,   rstK:1,    ban:[1800, 2500], dpi:[1600, 2300], evGap:[18, 26], ev:{carpet:1, banwave:1, sigs:1, burned:1, update:1}},
+  {name:'LTE',    net:'LTE',    iface:'rmnet_data0', at:45,  rstK:1.15, ban:[1500, 2100], dpi:[1400, 2000], evGap:[15, 22], ev:{carpet:1, banwave:1, sigs:1, burned:1, white:2}},
+  {name:'Регион', net:'регион', iface:'rmnet_data0', at:105, rstK:1.3,  ban:[1200, 1800], dpi:[1100, 1700], evGap:[11, 18], ev:{carpet:1, banwave:1, sigs:1, burned:1, white:3}},
+];
+/* msg and end can be lists: a random line is picked each time */
+const EVENTS = {
+  carpet:  {dur:4.5, title:'КОВРОВАЯ БЛОКИРОВКА',   col:'#B03030', sev:'warn',  row:'Блок подсетей целиком: Amazon, Google и все, кто рядом',
+            msg:['РКН банит подсети Amazon и Google целиком, как в 2018-м. Ищи проход между RST.', 'Ковровая блокировка: под раздачу попали все, кто стоял рядом. Ищи проход.'],
+            end:['Ковровую блокировку откатили. Полрунета выдохнуло.', 'Подсети разбанили. Заодно ожили чьи-то онлайн-кассы.']},
+  banwave: {dur:8,   title:'ВОЛНА БАНОВ ХОСТИНГОВ', col:'#8E2440', sev:'warn',  row:'Бан-лист пополнен подсетями хостингов',
+            msg:['Пошла волна банов по IP хостингов. Держи палец на смене хостинга.', 'Бан-лист обновили пачкой. Стены пойдут одна за другой.'],
+            end:['Волна банов схлынула. Хостеры считают убытки.', 'Бан-лист обновился. До пятницы тихо.']},
+  sigs:    {dur:9,   title:'СВЕЖИЕ СИГНАТУРЫ',      col:'#12272E', sev:'warn',  row:'Загружены свежие сигнатуры DPI',
+            msg:['ТСПУ получил свежие сигнатуры. Сканеры пойдут один за другим.', 'Пятничный релиз сигнатур. Тестировали, видимо, на тебе.'],
+            end:['Сканеры ушли на обед.', 'Сигнатуры откатили: легла пара банков.']},
+  burned:  {dur:6,   title:'МОСТ ЗАСВЕТИЛСЯ',       col:'#59316B', sev:'warn',  row:'Адрес моста добавлен в бан-лист',
+            msg:['Твой мост нашли и внесли в бан-лист. Жми ↑: бот в Telegram выдаст новый.', 'Мост засветился. Успей взять новый до стены: ↑ или тап.'],
+            end:['Новый мост держится. Пока о нём никто не знает.', 'Мост живой. Не рассказывай о нём в чатах.']},
+  update:  {dur:4,   title:'РОУТЕР ОБНОВЛЯЕТСЯ',    col:'#1D4F86', sev:'warn',  row:'',
+            msg:['Роутер решил поставить обновление. Прямо сейчас.', 'Роутер: «Доступна новая прошивка». Он не спрашивал.'], end:''},
+  white:   {dur:8,   title:'БЕЛЫЙ СПИСОК',          col:'#4A4F5C', sev:'error', row:'Режим белых списков: всё, чего нет в списке, в drop',
+            msg:['Мобильный интернет отключили. Работают Госуслуги, VK и маркетплейсы. Лови Wi-Fi.', 'Режим белых списков. Такси вызвать можно, YouTube нельзя. Лови Wi-Fi.'],
+            end:['Мобильный интернет вернули. До следующего раза.', 'Белый список сняли. Курьеры снова находят адреса.']},
+};
+const pick = a => Array.isArray(a) ? a[ri(a.length)] : a;
+const plural = (n, one, few, many) => {
+  const m10 = n % 10, m100 = n % 100;
+  return m10 === 1 && m100 !== 11 ? one : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? few : many;
+};
+const FREEZE = {
+  dpi16: {hud:'ЗАМОРОЖЕНО · R', canvas:'ЗАМОРОЗКА 16 КБ · жми R / ↻'},
+  router:{hud:'NAT ПУСТ · R',   canvas:'РОУТЕР ЗАБЫЛ ТЕБЯ · жми R / ↻'},
+};
+const DEATH = {
+  rst:{group:'Sequence', expert:'Соединение сброшено.',          filter:'tcp.flags.reset == 1'},
+  ban:{group:'Security', expert:'Пакет утонул в бан-листе.',     filter:'tcp.analysis.retransmission'},
+  dpi:{group:'Protocol', expert:'DPI опознал поток и сбросил.',  filter:'tcp.flags.reset == 1'},
+  wg: {group:'Protocol', expert:'WireGuard опознан. Как обычно.', filter:'wg.type == 2'},
+};
+const PICK = {
+  byte: {w:0.5,  fill:'#E4FFC7', stroke:'#6DAA3C', ink:'#3D6E1C'},
+  spare:{w:0.62, fill:'#FCE0FF', stroke:'#B04FC4', ink:'#7E2A93', label:'конфиг'},
+  wifi: {w:0.55, fill:'#DAEEFF', stroke:'#4E95D9', ink:'#1D4F86', label:'Wi-Fi'},
+  hop:  {w:0.62, fill:'#FFF1CC', stroke:'#E2A400', ink:'#7D5A00', label:'хоп РФ'},
+};
+const SEV = {error:'Error', warn:'Warning', note:'Note', chat:'Chat'};
+
+/* Expert Info chatter: a shared pool plus lines per transport and stage */
+const JOKES = [
+  'Замедление вызвано изношенным оборудованием Google. Источник надёжный.',
+  '16 КБ хватит всем.',
+  'Белый список обновлён. В нём теперь твой умный чайник.',
+  'Hetzner, DigitalOcean, OVH: три сестры, и все под подозрением.',
+  'Если пакет упал в лесу и никто не снял дамп, был ли он отправлен?',
+  'Пинг до YouTube: вопрос скорее философский.',
+  'Каждый ClientHello — маленький акт надежды.',
+  'Ретрансмит не провал. Это вторая попытка с опытом.',
+  'TTL уменьшается на каждом хопе. Как и у всех нас.',
+  'ТСПУ не злой. Его просто так настроили.',
+  'Где-то в чате «VPN для своих» уже пишут, что ничего не работает.',
+  'Мама спрашивает, почему YouTube работает только у тебя.',
+  'Провайдер ни при чём. Провайдер всегда ни при чём.',
+  'Сосед по подъезду смотрит YouTube через телевизор. Как — не говорит.',
+];
+const TR_JOKES = {
+  reality:[
+    'Microsoft не знает, что ты его трафик. Не говори ему.',
+    'Для DPI ты третий час качаешь обновление Windows. Правдоподобно.',
+    'Сертификат у тебя настоящий, от Microsoft. Сервер — нет.',
+    'Где-то в Фалькенштайне сервер держит для тебя сокет открытым.',
+  ],
+  tor:[
+    'Три хопа, три страны, один котик.',
+    'Каждая ячейка Tor ровно 514 байт. Tor любит порядок.',
+    'Exit-нода где-то в Нидерландах ждёт твои байты и пьёт кофе.',
+    'Луковица из трёх слоёв. Плачет от неё в основном ТСПУ.',
+  ],
+  wg:['WireGuard передаёт привет. Точнее, пытается.'],
+};
+const STAGE_JOKES = [
+  ['Роутер в коридоре мигает тебе зелёным. Он в тебя верит.', 'Дома всё стабильно. Подозрительно стабильно.'],
+  ['Одна палка LTE и непоколебимая вера.', 'CGNAT: у тебя один IP на весь район. Привет соседям.', 'Вышка в трёх километрах. Ты слышишь, как она старается.'],
+  ['В регионе интернет включают по расписанию. Расписание секретное.', 'Ближайший Wi-Fi в МФЦ. Работает по будням до шести.', 'Здесь YouTube смотрят по телевизору. Через спутник. В записи.'],
+];
+const MILESTONES = [
+  [2048,    '2 КБ. Это уже почти пятнадцать SMS.'],
+  [40960,   '40 КБ: сюда целиком влезает Super Mario Bros. для NES.'],
+  [65536,   '64 КБ: анимированный стикер в Telegram, ровно по лимиту.'],
+  [73728,   '72 КБ: вся постоянная память Apollo 11. Они долетели до Луны.'],
+  [102400,  '100 КБ. Целая дискета… шутка, это 7% дискеты.'],
+  [153600,  '150 КБ: один кадр 1080p с котиком.'],
+  [524288,  '512 КБ: превью видео целиком. Почти YouTube.'],
+  [655360,  '640 КБ. Говорят, этого хватит всем.'],
+  [1048576, '1 МБ через ТСПУ. Легенда.'],
+  [1474560, '1,44 МБ: целая дискета. Можно записать и отнести пешком.'],
+  [2621440, '2,5 МБ: рикролл целиком в 144p. Ты зарикроллил сам себя.'],
+  [5242880, '5 МБ. Wireshark просит ещё памяти.'],
+];
+/* Ending: epitaphs per cause of death, a "run moment" from the stats and an honest note on how it goes in real life */
+const EPITAPHS = [
+  'Пакет не дошёл, но путь был красивым.',
+  'TTL кончился раньше надежды.',
+  'Все пакеты когда-нибудь становятся ретрансмитами.',
+  'Дамп сохранён. Память о тебе тоже.',
+  'Ты был всего лишь 583 байтами. Но какими.',
+];
+const CAUSE_EPITAPHS = {
+  rst:['Сервер так и не узнал, что его именем попрощались.', 'Бросили трубку. Не ты и не сервер.'],
+  ban:['IP ушёл в бан-лист, и ты вместе с ним.', 'Сервер в Фалькенштайне так и не узнал, что ты был.'],
+  bridge:['Мост сгорел. Ты стоял на нём.', 'Бот в Telegram выдал бы новый. Не успел.'],
+  dpi:['Слишком случайный, чтобы быть правдой.', 'Шум был идеальным. В этом и ошибка.'],
+  wg: ['Зато честно.', 'Ты знал, на что шёл.', '148 байт с типом 1 видно из космоса.'],
+};
+const REAL = {
+  rst:['В жизни ТСПУ чаще не шлёт RST, а молча выбрасывает пакеты: сайт просто висит. RST — почерк старых провайдерских DPI.',
+       'Подделанный RST выглядит так, будто сервер сам бросил трубку. Сервер при этом ничего не отправлял.'],
+  ban:['В жизни IP банят точечно: адрес засветился, и скоро его нет. Подсети целиком банили в 2018-м, и половина рунета легла.',
+       'Сайт www.microsoft.com на адресе маленького хостинга — странное сочетание. Такие нестыковки и выдают сервер.'],
+  bridge:['Мосты Tor раздают понемногу и прячут, но рано или поздно адрес попадает в бан-лист. Тогда нужен новый.'],
+  dpi:['Поток, в котором нет ни одного узнаваемого байта, сам по себе примета. Обычный трафик так ровно не шумит.',
+       'Публичные узлы Tor в России заблокированы с декабря 2021-го. Мосты — то, что осталось.'],
+  wg: ['Рукопожатие WireGuard — 148 байт, и первый байт всегда 1. Сигнатура проще не бывает.',
+       'WireGuard делали быстрым, а не незаметным. Прятаться он и не пытался.'],
+  freeze:'Заморозка настоящая: с 2025-го TCP до зарубежных хостингов замирает примерно после 16–20 КБ, и страница не догружается.',
+  white:'Белые списки тоже не выдумка: в 2025-м регионы начали отключать мобильный интернет целиком, кроме списка «социально значимых» сайтов.',
+};
+const SHARDS = ['DE','AD','BE','EF','00','FF','RST','16','03','01','0x0'];
+const BG_COL = ['#E7E6FF','#DAEEFF','#E4FFC7','#FAF0D7','#E7E6FF','#E7E6FF','#DAEEFF','#A0A0A0'];
+const BG_PROTO = ['TCP','TLSv1.3','QUIC','DNS','TCP','TLSv1.3','TCP','TCP'];
+const BG_INFO = ['[ACK] Seq=1 Ack=1449','Application Data','Initial, DCID=8f2c…','Standard query A ya.ru','[TCP Retransmission]','Application Data','[TCP Dup ACK 41#1]','[FIN, ACK]'];
+
+const rand = (a, b) => a + Math.random() * (b - a);
+const ri = n => Math.floor(Math.random() * n);
+const comma = s => s.replace('.', ',');
+const fmtB = b => b < 1024 ? b + ' Б' : b < 1048576 ? comma((b / 1024).toFixed(1)) + ' КБ' : comma((b / 1048576).toFixed(2)) + ' МБ';
+const clampLane = l => Math.max(0, Math.min(2, l));
+const shuffle = a => { for (let i = a.length - 1; i > 0; i--){ const j = ri(i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+function prng(seed){
+  return () => {
+    seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+let W = 0, H = 0, laneW = 0, dpr = 1;
+const laneX = l => laneW * (l + 0.5);
+
+const bests = {reality:0, tor:0, wg:0};
+let trId = 'reality';
+try {
+  for (const id of TR_ORDER) bests[id] = Number(localStorage.getItem('clienthello.best.' + id)) || 0;
+  const saved = localStorage.getItem('clienthello.transport');
+  if (TR_ORDER.includes(saved)) trId = saved;
+} catch (e) {}
+const TR = () => TRANSPORTS[trId];
+
+function fresh(){
+  return {
+    mode:'title', t:0, speed:0, dist:0, bgOff:0, lane:1, x:1, moveQ:[],
+    host:ri(3), bridge:ri(BRIDGES.length), stage:0, client:HOME_IP,
+    st:{reconn:0, switches:0, freezes:0, spare:0, wifi:0, hop:0, carpet:0, white:0, keen:0, burned:0, sigs:0, banwave:0},
+    delivered:0, conn:0, frozen:false, frozeWhy:'', handshake:0, invuln:0, spare:0, hop:false,
+    packets:0, bands:0, ents:[], floats:[], parts:[],
+    nextRst:420, nextByte:160, nextBan:900, nextDpi:1500, nextSpare:5200, nextEv:14,
+    ev:null, lastEv:'', banner:null, wg:null,
+    port:49152 + ri(16000), ms:0, cause:null, overShown:false,
+    expertUntil:0, jokesSeen:[],
+  };
+}
+let S = fresh();
+const host = () => HOSTS[S.host];
+const bridge = () => BRIDGES[S.bridge];
+const dstIp = () => trId === 'tor' ? bridge().ip : host().ip;
+const dstPort = () => trId === 'tor' ? bridge().port : trId === 'wg' ? 51820 : 443;
+
+/* ---------- packet list ---------- */
+const plist = $('plist'), plistWrap = $('plistWrap');
+let pktNo = 0, capT0 = performance.now();
+const COLS = ['no','time','src','dst','proto','len','info'];
+function log(cls, proto, info, len, src = S.client, dst = dstIp()){
+  pktNo++;
+  const tr = document.createElement('tr');
+  tr.className = 'r-' + cls;
+  const vals = [pktNo, ((performance.now() - capT0) / 1000).toFixed(6), src, dst, proto, len || '—', info];
+  vals.forEach((v, i) => {
+    const td = document.createElement('td');
+    td.className = 'c-' + COLS[i];
+    td.textContent = v;
+    tr.appendChild(td);
+  });
+  plist.appendChild(tr);
+  while (plist.rows.length > 90) plist.deleteRow(0);
+  plistWrap.scrollTop = plistWrap.scrollHeight;
+  updateStatus();
+}
+function connRows(){
+  const dst = dstIp(), dp = dstPort();
+  log('syn', 'TCP', `${S.port} → ${dp} [SYN] Seq=0 Win=64240 Len=0 MSS=1460`, 74);
+  log('syn', 'TCP', `${dp} → ${S.port} [SYN, ACK] Seq=0 Ack=1 Win=65535 Len=0 MSS=1460`, 74, dst, S.client);
+  log('tcp', 'TCP', `${S.port} → ${dp} [ACK] Seq=1 Ack=1 Win=64240 Len=0`, 66);
+  if (trId === 'reality') log('xtls', 'TLSv1.3', `Client Hello (SNI=${MS_SNI})`, 583);
+  else { const n = 600 + ri(800); log('tcp', 'TCP', `${S.port} → ${dp} [PSH, ACK] Seq=1 Ack=1 Len=${n}`, n + 66); }
+}
+function connDoneRows(){
+  if (trId === 'reality') log('xtls', 'TLSv1.3', 'Server Hello, Change Cipher Spec, Application Data', 1514, dstIp(), S.client);
+  else { const n = 600 + ri(800); log('tcp', 'TCP', `${dstPort()} → ${S.port} [PSH, ACK] Seq=1 Len=${n}`, n + 66, dstIp(), S.client); }
+}
+
+/* ---------- chrome around the field ---------- */
+const expertEl = $('expert'), expertSev = $('expertSev'), expertMsg = $('expertMsg');
+function expert(sev, msg, hold = 3.2){
+  expertEl.dataset.sev = sev;
+  expertSev.textContent = SEV[sev];
+  expertMsg.textContent = msg;
+  S.expertUntil = S.t + hold;
+}
+function updateFilter(){
+  const f = $('filter');
+  if (S.mode === 'over'){
+    f.classList.add('bad');
+    $('filterText').textContent = DEATH[S.cause].filter;
+    return;
+  }
+  f.classList.remove('bad');
+  $('filterText').textContent = trId === 'reality' ? `tls.handshake.extensions_server_name == "${MS_SNI}"`
+    : trId === 'tor' ? `ip.addr == ${bridge().ip} && !tls` : 'wg.type == 1';
+}
+function updateStatus(){
+  const st = STAGES[S.stage];
+  $('stPackets').textContent = pktNo;
+  $('stDelivered').textContent = fmtB(S.delivered);
+  $('stNet').textContent = `${st.iface} · ${st.net}`;
+  $('stTr').textContent = trId === 'reality' ? `Reality · ${host().name} ${host().cc}` : trId === 'tor' ? `Tor · мост ${bridge().ip}` : TR().name;
+  $('stBest').textContent = fmtB(bests[trId]);
+}
+function updateControls(){ $('btnSniTxt').textContent = trId === 'tor' ? 'мост ⟳' : 'хостинг ⟳'; }
+const esc = c => c === '<' ? '&lt;' : c === '>' ? '&gt;' : c === '&' ? '&amp;' : c;
+function hexDump(bytes, base, isHi){
+  let html = '';
+  for (let i = 0; i < bytes.length; i += 16){
+    let hx = '', as = '';
+    for (let j = i; j < i + 16; j++){
+      const sep = j === i + 7 ? '  ' : ' ';
+      if (j >= bytes.length){ hx += '  ' + sep; continue; }
+      const b = bytes[j], h = b.toString(16).padStart(2, '0');
+      const a = b >= 32 && b < 127 ? esc(String.fromCharCode(b)) : '.';
+      if (isHi(j)){
+        const join = isHi(j + 1) && j + 1 < i + 16 && j + 1 < bytes.length;
+        hx += '<mark>' + h + (join ? sep : '') + '</mark>' + (join ? '' : sep);
+        as += '<mark>' + a + '</mark>';
+      } else {
+        hx += h + sep;
+        as += a;
+      }
+    }
+    html += `<span class="off">${(base + i).toString(16).padStart(4, '0')}</span>  ${hx} ${as}\n`;
+  }
+  return html;
+}
+function renderHex(){
+  const r = prng(S.port), noise = n => Array.from({length:n}, () => Math.floor(r() * 256));
+  let bytes, base, isHi = () => false, tint = '#FCE0FF', head, detail;
+  if (trId === 'reality'){
+    const n = MS_SNI.length;
+    const pre = [0x13,0x01,0x13,0x02,0x13,0x03,0xc0,0x2b,0xc0,0x2f,0x01,0x00,0x01,0x93];
+    const ext = [0x00,0x00,(n + 5) >> 8,(n + 5) & 255,(n + 3) >> 8,(n + 3) & 255,0x00,n >> 8,n & 255];
+    const post = [0x00,0x17,0x00,0x00,0xff,0x01,0x00,0x01,0x00,0x00,0x0a,0x00,0x0c,0x00,0x0a,0x00,0x1d,0x00,0x17,0x00,0x18,0x01,0x00];
+    bytes = pre.concat(ext, Array.from(MS_SNI, ch => ch.charCodeAt(0)), post);
+    const hs = pre.length + ext.length;
+    isHi = j => j >= hs && j < hs + n;
+    base = 0xb0;
+    head = '▾ TLSv1.3 Record Layer: Handshake Protocol: Client Hello';
+    detail = `Extension: server_name (len=${n + 5}) → Server Name: ${MS_SNI}`;
+  } else if (trId === 'tor'){
+    bytes = [0x0a, 0x3c].concat(noise(78));
+    base = 0x40;
+    head = '▾ Data (543 bytes)';
+    detail = 'Энтропия 7,99 бит/байт. Подозрительно ровный шум.';
+  } else {
+    const s = S.wg ? S.wg.sender : '5f1a9c03';
+    const ip = host().ip.split('.').map(Number);
+    const sender = s.match(/../g).map(x => parseInt(x, 16)).reverse();
+    bytes = [ip[2], ip[3], S.port >> 8, S.port & 255, 0xca, 0x6c, 0x00, 0x9c].concat(noise(2), [0x01, 0x00, 0x00, 0x00], sender, noise(62));
+    base = 0x20;
+    isHi = j => (j >= 6 && j < 8) || (j >= 10 && j < 14);
+    tint = '#FFAFAF';
+    head = '▾ WireGuard Protocol';
+    detail = `Type: Handshake Initiation (1) · Reserved: 000000 · Sender: 0x${s}`;
+  }
+  const hexEl = $('hex');
+  hexEl.style.setProperty('--mk', tint);
+  hexEl.innerHTML = hexDump(bytes, base, isHi);
+  $('detHead').textContent = head;
+  $('sniDetail').textContent = detail;
+}
+const hud = document.querySelector('.hud'), hudDelivered = $('hudDelivered'), hudConn = $('hudConn'), hudConnBar = $('hudConnBar'), hudConnTxt = $('hudConnTxt'), hudSpare = $('hudSpare');
+let lastHud = '';
+function updateHud(){
+  const key = [trId, S.delivered, S.conn, S.frozen, S.frozeWhy, S.handshake > 0, S.spare].join('|');
+  if (key === lastHud) return;
+  lastHud = key;
+  hudDelivered.textContent = fmtB(S.delivered);
+  hudConnBar.style.transform = `scaleX(${Math.min(1, S.conn / FREEZE_AT)})`;
+  hudConnTxt.textContent = TR().doomed ? 'ответа нет…'
+    : S.handshake > 0 ? (trId === 'tor' ? 'цепочка…' : 'рукопожатие…')
+    : S.frozen ? FREEZE[S.frozeWhy].hud : fmtB(S.conn) + ' / 16 КБ';
+  hudConn.classList.toggle('frozen', S.frozen);
+  hudConn.classList.toggle('hot', !S.frozen && S.conn >= 12288);
+  hudSpare.hidden = !S.spare;
+  hud.classList.toggle('spare', !!S.spare);
+}
+
+/* ---------- dialogs ---------- */
+function showDialog(id, focus = true){
+  $('overlay').hidden = false;
+  for (const d of ['dlgTitle', 'dlgOver', 'dlgPause']) $(d).hidden = d !== id;
+  if (focus){ const b = $(id).querySelector('button'); if (b) b.focus({preventScroll:true}); }
+}
+const hideOverlay = () => { $('overlay').hidden = true; };
+function renderPicks(){
+  for (const b of document.querySelectorAll('.pick')){
+    const on = b.dataset.tr === trId;
+    b.setAttribute('aria-checked', String(on));
+    b.tabIndex = on ? 0 : -1;
+  }
+}
+function focusPick(){ const b = document.querySelector(`.pick[data-tr="${trId}"]`); if (b) b.focus({preventScroll:true}); }
+function showBests(){
+  const el = $('tBest');
+  el.hidden = !(bests.reality || bests.tor);
+  el.textContent = 'Рекорды: ' + TR_ORDER.map(id => `${TRANSPORTS[id].short} ${fmtB(bests[id])}`).join(' · ');
+}
+/* Comparisons for the summary: [from, to, text]. A random one is picked among those that fit the size */
+const pct = (b, u) => Math.max(1, Math.round(b / u * 100)) + '%';
+const times = n => `${n} ${plural(n, 'раз', 'раза', 'раз')}`;
+const cnt = (b, u, one, few, many) => { const n = Math.round(b / u); return `${n} ${plural(n, one, few, many)}`; };
+const EQUIV = [
+  [140, 30000,       b => `Это ${Math.round(b / 140)} SMS по 140 байт. Хватит объяснить маме, что такое VPN.`],
+  [583, 60000,       b => `Это ${cnt(b, 583, 'ClientHello', 'ClientHello', 'ClientHello')} вроде того, с которого всё началось.`],
+  [4000, 40960,      b => `Это ${pct(b, 40960)} Super Mario Bros. Принцесса в другом замке.`],
+  [61000, 1e6,       b => `Это ${cnt(b, 40960, 'копия', 'копии', 'копий')} Super Mario Bros. для NES. Принцесса всё равно в другом замке.`],
+  [8000, 73728,      b => `Это ${pct(b, 73728)} памяти, с которой Apollo 11 долетел до Луны.`],
+  [110000, 3e6,      b => `Это память ${cnt(b, 73728, 'бортового компьютера', 'бортовых компьютеров', 'бортовых компьютеров')} Apollo 11. Луна оказалась ближе YouTube.`],
+  [8000, 65536,      b => `Это ${pct(b, 65536)} одного анимированного стикера в Telegram.`],
+  [98000, 3e6,       b => `Это ${cnt(b, 65536, 'анимированный стикер', 'анимированных стикера', 'анимированных стикеров')} в Telegram. Можно было просто отправить стикер.`],
+  [16384, 153600,    b => `Это ${pct(b, 153600)} одного кадра 1080p с котиком.`],
+  [230000, 1e7,      b => `Это ${cnt(b, 153600, 'кадр', 'кадра', 'кадров')} 1080p с котиком. Почти гифка.`],
+  [6000, 1e7,        b => { const s = Math.round(b / 12288); return `На YouTube в 144p это ${s} ${plural(s, 'секунда', 'секунды', 'секунд')}. Ради этого всё и затевалось.`; }],
+  [60000, 2621440,   b => `Это ${pct(b, 2621440)} рикролла в 144p. Рик гордится, но не до конца.`],
+  [200000, 1474560,  b => `Это ${pct(b, 1474560)} дискеты на 1,44 МБ.`],
+  [16384, 66000,     b => `Это ${pct(b, 66000)} этой самой игры. Скачать её саму у тебя бы не вышло.`],
+  [300000, 1e8,      b => `Это примерно ${Math.round(b / 16384)} с подкаста в 128 kbps.`],
+];
+function equiv(b){
+  if (b === 0) return TR().doomed ? 'Ни одного байта. Зато Handshake Initiation ушёл красиво.'
+    : pick(['Ни одного байта. Зато рукопожатие было красивое.', 'Ноль байт. ТСПУ даже не вспотел.', 'Ни байта. Зато в логах ТСПУ ты теперь навсегда.']);
+  const fit = EQUIV.filter(([lo, hi]) => b >= lo && b < hi);
+  return fit.length ? pick(fit)[2](b) : `Это ${fmtB(b)}. Сравнивать уже не с чем.`;
+}
+function moment(cause){
+  const s = S.st, m = [];
+  if (s.spare) m.push(s.spare > 1 ? `Конфиг от друга спас тебя ${times(s.spare)}. Друг заслужил пиво.` : 'Конфиг от друга спас тебя. Друг заслужил пиво.');
+  if (s.wifi) m.push('Пережил белый список через Wi-Fi в кафе. Кофе остыл, зато байты пошли.');
+  if (s.hop) m.push('Поймал хоп через РФ. Такое бывает не в каждый забег.');
+  if (s.keen) m.push('Роутер обновился, а ты нет. И правильно.');
+  if (s.carpet) m.push('Пережил ковровую блокировку. Telegram в 2018-м тоже пережил.');
+  if (s.burned) m.push(s.burned > 1 ? `Пережил ${s.burned} ${plural(s.burned, 'сгоревший мост', 'сгоревших моста', 'сгоревших мостов')}. Бот в Telegram тебя уже узнаёт.` : 'Мост сгорел, а ты успел перескочить. Красиво.');
+  if (s.freezes >= 3) m.push(`Замерзал ${times(s.freezes)} и каждый раз оттаивал.`);
+  if (trId === 'reality' && s.switches >= 5) m.push(`Сменил хостинг ${times(s.switches)}. Хостеры видят тебя в кошмарах.`);
+  if (s.white && !s.wifi) m.push('Пережил белый список, просто переждав. Стоицизм.');
+  if (S.stage === 2) m.push('Доехал до региона. Дальше только голубиная почта.');
+  if (S.bands >= 10) m.push(`Прошёл ТСПУ ${times(S.bands)}. ТСПУ запомнил твой порт.`);
+  if (!m.length && S.t < 6 && cause !== 'wg') m.push('Забег короче, чем загрузка Госуслуг.');
+  return m.length ? pick(m) : '';
+}
+function realNote(cause){
+  const s = S.st, pool = [].concat(cause === 'ban' && trId === 'tor' ? REAL.bridge : REAL[cause]);
+  if (s.freezes && cause !== 'wg') pool.push(REAL.freeze);
+  if (s.white) pool.push(REAL.white);
+  return pick(pool);
+}
+
+/* ---------- game flow ---------- */
+function setTr(id){
+  if (S.mode === 'play' || S.mode === 'pause' || !TR_ORDER.includes(id)) return;
+  trId = id;
+  try { localStorage.setItem('clienthello.transport', id); } catch (e) {}
+  if (S.mode === 'title') seedAttract();
+  renderPicks(); updateFilter(); renderHex(); updateStatus(); updateControls();
+  if (document.activeElement && document.activeElement.classList.contains('pick')) focusPick();
+}
+const cycleTr = d => setTr(TR_ORDER[(TR_ORDER.indexOf(trId) + d + TR_ORDER.length) % TR_ORDER.length]);
+function start(){
+  if (S.mode === 'play' || S.mode === 'pause') return;
+  if (S.mode === 'over' && !S.overShown) return;
+  const tr = TR();
+  S = fresh();
+  S.mode = 'play';
+  S.speed = 230 * tr.speedK;
+  plist.innerHTML = '';
+  pktNo = 0;
+  capT0 = performance.now();
+  lastHud = '';
+  hideOverlay();
+  if (tr.doomed){
+    S.wg = {sender:(0x10000000 + ri(0xE0000000)).toString(16), n:1, next:0.45};
+    log('udp', 'WireGuard', `Handshake Initiation, sender=0x${S.wg.sender}`, 190);
+    S.ents.push({type:'dpi', lane:-1, y:Math.round(H - PY_OFF - S.speed * 1.8), h:BAND_H.dpi, gap:-1, done:false});
+    expert('note', 'Handshake Initiation ушёл. Ждём Handshake Response…', 1e9);
+  } else {
+    S.handshake = tr.hs;
+    connRows();
+    expert('note', trId === 'reality'
+      ? 'Для DPI ты www.microsoft.com. Стена банит два хостинга из трёх: успей пересесть на свободный.'
+      : 'Мост поднят. DPI косится на шум: держись прохода. Засветится мост — жми ↑ за новым.', 5);
+  }
+  updateFilter(); renderHex(); updateStatus(); updateControls();
+}
+function toTitle(){
+  if (S.mode !== 'over' || !S.overShown) return;
+  S = fresh();
+  seedAttract();
+  updateFilter(); renderHex(); updateStatus(); updateControls(); renderPicks(); showBests();
+  showDialog('dlgTitle', false);
+  focusPick();
+  expert('chat', 'Выбирай, на чём едешь.', 1e9);
+}
+function pause(){ if (S.mode !== 'play') return; S.mode = 'pause'; showDialog('dlgPause'); }
+function resume(){ if (S.mode !== 'pause') return; S.mode = 'play'; hideOverlay(); }
+function move(d){
+  if (S.mode !== 'play') return;
+  if (TR().lag) S.moveQ.push({at:S.t + TR().lag, d});
+  else S.lane = clampLane(S.lane + d);
+}
+function newConn(){
+  S.handshake = TR().hs;
+  S.frozen = false;
+  S.frozeWhy = '';
+  S.conn = 0;
+  S.port = 49152 + ri(16000);
+  connRows();
+  updateFilter(); renderHex(); updateStatus();
+}
+function reconnect(){
+  if (S.mode !== 'play' || S.handshake > 0 || TR().doomed) return;
+  newConn();
+  S.st.reconn++;
+  expert('chat', trId === 'tor' ? 'Строим новую цепочку: guard → middle → exit.' : 'Новое соединение. ТСПУ пока не в курсе.');
+}
+function switchHost(d){
+  if (S.mode !== 'play' || TR().doomed) return;
+  S.st.switches++;
+  if (trId === 'tor'){
+    S.bridge = (S.bridge + d + BRIDGES.length) % BRIDGES.length;
+    newConn();
+    expert('chat', `Бот в Telegram выдал мост ${bridge().ip}. Строим цепочку заново.`, 2.5);
+    return;
+  }
+  S.host = (S.host + d + HOSTS.length) % HOSTS.length;
+  newConn();
+  expert('chat', `Переезд на ${host().name} (${host().cc}, ${host().as}). Новый IP, новое соединение.`, 2.5);
+}
+function freeze(why){
+  S.frozen = true;
+  S.frozeWhy = why;
+  S.handshake = 0;
+  if (why === 'dpi16'){
+    S.st.freezes++;
+    log('bad', 'TCP', `[TCP Dup ACK] ${S.port} → ${dstPort()} · после 16 КБ ответ перестал приходить: заморозка ТСПУ`, 66);
+    expert('warn', '16 КБ на одно соединение до зарубежного хостинга. Канал заморожен. Жми R.', 4);
+  } else {
+    S.st.keen++;
+    log('bad', 'TCP', `[TCP Retransmission] ${S.port} → ${dstPort()} · NAT-сессия умерла вместе с роутером`, 66);
+    expert('warn', 'Роутер вернулся, но забыл все NAT-сессии. Жми R.', 4);
+  }
+}
+function float(x, y, txt, color){ S.floats.push({x, y, txt, color, life:1}); }
+
+function deadWhy(){
+  if (TR().doomed) return 'wg';
+  if (S.handshake > 0) return 'hs';
+  if (S.frozen) return S.frozeWhy;
+  if (S.ev && S.ev.id === 'white' && !S.ev.bypass) return 'white';
+  if (S.ev && S.ev.id === 'update') return 'update';
+  return '';
+}
+function deadRow(why){
+  const dp = dstPort();
+  if (why === 'wg') log('udp', 'WireGuard', `Handshake Initiation, sender=0x${S.wg.sender} [ответа нет]`, 190);
+  else if (why === 'hs') log('syn', 'TCP', `${dp} → ${S.port} [ACK] Win=0 · ${trId === 'tor' ? 'цепочка' : 'рукопожатие'} ещё не готово`, 66, dstIp(), S.client);
+  else if (why === 'dpi16') log('ice', 'TCP', `[TCP Retransmission] ${dp} → ${S.port} · канал заморожен`, 1514, dstIp(), S.client);
+  else if (why === 'router') log('bad', 'TCP', `[TCP Retransmission] ${S.port} → ${dp} · NAT тебя не помнит`, 66);
+  else if (why === 'white') log('bad', 'TCP', `[TCP Retransmission] ${S.port} → ${dp} · белый список: ответа не будет`, 66);
+  else log('arp', 'ARP', `Who has ${ROUTER}? Tell ${S.client}`, 42, 'Intel_5e:0a:11', 'Broadcast');
+}
+function pickup(e){
+  S.packets++;
+  const tr = TR(), x = laneX(e.lane), why = deadWhy();
+  if (why){
+    float(x, e.y, '0 Б', '#7D8796');
+    deadRow(why);
+    return;
+  }
+  S.delivered += tr.seg;
+  S.conn += tr.seg;
+  float(x, e.y, '+' + tr.seg + ' Б', '#2F7D1E');
+  if (trId === 'reality') log('tcp', 'TLSv1.3', 'Application Data', 1514, dstIp(), S.client);
+  else log('tcp', 'TCP', `${dstPort()} → ${S.port} [PSH, ACK] Len=543`, 609, dstIp(), S.client);
+  while (S.ms < MILESTONES.length && S.delivered >= MILESTONES[S.ms][0]){
+    const txt = MILESTONES[S.ms][1];
+    log('ok', 'Expert', 'Note: ' + txt, 0, '—', '—');
+    expert('note', txt, 4);
+    S.ms++;
+  }
+  if (tr.freeze && S.conn >= FREEZE_AT) freeze('dpi16');
+}
+function grab(e){
+  const x = laneX(e.lane);
+  if (e.type === 'spare'){
+    S.spare = 1;
+    float(x, e.y, '+1 конфиг', '#7E2A93');
+    log('ok', 'Expert', 'Note: друг скинул новый конфиг. Это запасная жизнь', 0, '—', '—');
+    expert('note', 'Друг скинул новый конфиг. Если что-то прилетит, переживёшь.', 3);
+  } else if (e.type === 'wifi'){
+    if (!S.ev || S.ev.id !== 'white') return;
+    S.st.wifi++;
+    endEvent(true);
+    float(x, e.y, 'Wi-Fi', '#1D4F86');
+    log('udp', 'DHCP', 'DHCP ACK - Transaction ID 0x51c0ffee (Cafe_Guest)', 342, '10.0.0.1', '10.0.0.57');
+    expert('note', 'Wi-Fi в кафе: пароль на чеке, белых списков нет. Клиент переподключается.', 3.5);
+    newConn();
+  } else {
+    if (S.ev && S.ev.id === 'white') endEvent(true);
+    S.hop = true;
+    S.st.hop++;
+    float(x, e.y, 'ХОП РФ', '#7D5A00');
+    log('xtls', 'TLSv1.3', `Client Hello (SNI=${MS_SNI}) · через хоп в РФ из белого списка`, 583);
+    expert('note', 'Хоп через РФ из белого списка. Редкость. Следующий белый список он тоже переживёт.', 4);
+  }
+}
+function hit(cause, e){
+  if (S.invuln > 0) return false;
+  if (S.spare && cause !== 'wg'){
+    S.spare = 0;
+    S.st.spare++;
+    S.invuln = 1.5;
+    if (e && e.type === 'rst') e.gone = true;
+    if (cause === 'ban' && e.type === 'bban') S.bridge = (e.bridge + 1) % BRIDGES.length;
+    else if (cause === 'ban'){ let h = S.host; while (e.hosts.includes(h)) h = (h + 1) % HOSTS.length; S.host = h; }
+    float(laneX(S.x), H - PY_OFF - 34, 'конфиг от друга', '#7E2A93');
+    log('ok', 'Expert', 'Note: сработал конфиг от друга. Дружба сильнее ТСПУ', 0, '—', '—');
+    expert('note', cause === 'ban'
+      ? `Конфиг от друга, и ты уже на ${trId === 'tor' ? 'новом мосту' : host().name}. Дружба сильнее ТСПУ.`
+      : 'Сработал конфиг от друга. Новое соединение, старое не жалко.', 3.5);
+    newConn();
+    return false;
+  }
+  die(cause, e);
+  return true;
+}
+function deathText(cause, h, e){
+  if (cause === 'rst'){
+    const who = trId === 'tor' ? 'моста' : `сервера на ${h.name}`;
+    return pick([`Пришёл RST от имени ${who}. Подпись ${trId === 'tor' ? 'моста' : 'сервера'}, почерк ТСПУ.`,
+      `RST, ACK прямо в лоб. ТСПУ подписался именем ${who}.`,
+      'Соединение оборвал «сервер». Сам сервер об этом не знает.']);
+  }
+  if (cause === 'ban' && e.type === 'bban') return pick([`Мост ${BRIDGES[e.bridge].ip} засветился и уехал в бан-лист. Новый ты так и не взял.`,
+    'Мост в бан-листе, а ты всё ещё на нём. Бот в Telegram ждал тебя.']);
+  if (cause === 'ban') return pick([`IP твоего VPS (${h.as}, ${h.name} ${h.cc}) в бан-листе. Свободен был ${HOSTS[e.free].name}.`,
+    `${h.name} ${h.cc} в бан-листе. ${HOSTS[e.free].name} был свободен, ты не успел пересесть.`]);
+  if (cause === 'dpi') return pick(['DPI решил, что честный трафик не бывает таким случайным.',
+    'Сканер увидел идеально ровный шум и не поверил, что это котики.',
+    'Ты был не в проходе. DPI был.']);
+  return pick(['WireGuard режется всегда и везде. Handshake Response так и не пришёл.',
+    'Handshake Initiation ушёл. Handshake Response остался мечтой.']);
+}
+function die(cause, e){
+  const tr = TR(), dead = S, h = host(), dp = dstPort(), col = playerColor();
+  S.mode = 'over';
+  S.cause = cause;
+  const px = laneX(S.x), py = H - PY_OFF;
+  if (!REDUCED){
+    for (let i = 0; i < 28; i++){
+      const a = Math.random() * Math.PI * 2, v = rand(120, 380);
+      S.parts.push({x:px, y:py, vx:Math.cos(a) * v, vy:Math.sin(a) * v - 160, life:1, rot:0, vr:rand(-6, 6), txt:SHARDS[ri(SHARDS.length)], color:i % 3 === 0 ? '#E04848' : col});
+    }
+  }
+  if (cause === 'rst') log('bad', 'TCP', `${dp} → ${S.port} [RST, ACK] Seq=1 Win=0 (от имени ${trId === 'tor' ? 'моста' : h.name}, отправил ТСПУ)`, 60, dstIp(), S.client);
+  else if (cause === 'ban') log('bad', 'TCP', `[TCP Retransmission] ${S.port} → ${dp} · ${trId === 'tor' ? 'мост ' + dstIp() : h.as + ' ' + h.name} в бан-листе, ответа не будет`, 66);
+  else if (cause === 'dpi') log('bad', 'TCP', `${dp} → ${S.port} [RST, ACK] DPI: энтропия 7,99 бит/байт, слишком ровный шум`, 60, dstIp(), S.client);
+  else log('bad', 'WireGuard', 'Handshake Initiation → DROP: сигнатура WireGuard', 190);
+  const isBest = S.delivered > bests[trId];
+  if (isBest){
+    bests[trId] = S.delivered;
+    try { localStorage.setItem('clienthello.best.' + trId, String(S.delivered)); } catch (e) {}
+  }
+  updateFilter(); updateStatus();
+  expert('error', DEATH[cause].expert, 1e9);
+  setTimeout(() => {
+    if (S !== dead) return;
+    $('ovGroup').textContent = DEATH[cause].group;
+    $('ovProto').textContent = cause === 'wg' ? 'WireGuard' : 'TCP';
+    $('ovSummary').textContent = deathText(cause, h, e);
+    $('ovDelivered').textContent = fmtB(S.delivered);
+    $('ovEquiv').textContent = equiv(S.delivered);
+    const mo = moment(cause);
+    $('ovMoment').textContent = mo;
+    $('ovMoment').hidden = !mo;
+    $('ovReal').textContent = realNote(cause);
+    $('ovBest').textContent = isBest && S.delivered > 0 ? `Новый рекорд на ${tr.short}` : `Рекорд на ${tr.short}: ${fmtB(bests[trId])}`;
+    $('ovStats').textContent = `${STAGES[S.stage].name} · в сети ${comma(S.t.toFixed(1))} с · ТСПУ пройдено: ${S.bands}` + (S.st.reconn ? ` · переподключений: ${S.st.reconn}` : '');
+    const ek = cause === 'ban' && e && e.type === 'bban' ? 'bridge' : cause;
+    $('ovEpitaph').textContent = cause === 'wg' || Math.random() < 0.6 ? pick(CAUSE_EPITAPHS[ek]) : pick(EPITAPHS);
+    $('ovEpitaph').hidden = !!mo;
+    S.overShown = true;
+    showDialog('dlgOver');
+  }, REDUCED ? 0 : 650);
+}
+
+/* ---------- stages and events ---------- */
+function stageTick(){
+  const n = S.stage + 1;
+  if (n >= STAGES.length || S.t < STAGES[n].at) return;
+  S.stage = n;
+  S.banner = {txt:`ЭТАП ${n + 1} · ${STAGES[n].name.toUpperCase()}`, until:S.t + 2.6};
+  if (n === 1){
+    if (S.ev && S.ev.id === 'update'){ S.ev = null; S.nextEv = S.t + 6; }
+    log('udp', 'DHCP', 'DHCP Release - Transaction ID 0x3e7a91c2', 342, HOME_IP, ROUTER);
+    S.client = LTE_IP;
+    log('ok', 'Expert', 'Note: захват переехал на rmnet_data0', 0, '—', '—');
+    expert('warn', 'Вышел из дома: телефон перескочил на LTE. Новый IP, клиент переподключается сам.', 4.5);
+    newConn();
+  } else {
+    log('ok', 'Expert', 'Note: регион. Мобильный интернет тут по расписанию', 0, '—', '—');
+    expert('warn', 'Ты в регионе. Мобильный интернет тут включают по настроению.', 4.5);
+  }
+  updateStatus();
+}
+function startEvent(){
+  const st = STAGES[S.stage], tr = TR(), pool = [];
+  for (const id in st.ev){
+    if (id === 'banwave' && !tr.bans) continue;
+    if (id === 'sigs' && !tr.dpi) continue;
+    if (id === 'burned' && trId !== 'tor') continue;
+    if (id === 'update' && S.t + 6 > STAGES[1].at) continue;
+    if (id === S.lastEv) continue;
+    for (let i = 0; i < st.ev[id]; i++) pool.push(id);
+  }
+  if (!pool.length){ S.nextEv = S.t + 4; return; }
+  const id = pool[ri(pool.length)], m = EVENTS[id];
+  S.lastEv = id;
+  S.ev = {id, left:m.dur + (id === 'white' && S.stage === 2 ? 2 : 0), age:0, next:S.dist + 220, gap:ri(3), wifi:0, hopRoll:Math.random() < 0.15, bypass:false, bridge:S.bridge, spawned:false};
+  if (id === 'white' && S.hop){
+    S.hop = false;
+    S.ev.bypass = true;
+    log('xtls', 'TLSv1.3', 'Application Data · хоп через РФ всё ещё в белом списке', 1514, dstIp(), S.client);
+    expert('note', 'Белый список, но хоп через РФ в нём. Трафик идёт. Пока.', 4);
+    return;
+  }
+  if (id === 'update') log('arp', 'ARP', `Who has ${ROUTER}? Tell ${S.client}`, 42, 'Intel_5e:0a:11', 'Broadcast');
+  else log('bad', 'ТСПУ', m.row, 0, '—', '—');
+  expert(m.sev, pick(m.msg), Math.min(6, S.ev.left));
+}
+function endEvent(silent){
+  const id = S.ev.id;
+  S.ev = null;
+  S.nextEv = S.t + rand(...STAGES[S.stage].evGap);
+  if (silent) return;
+  if (id in S.st) S.st[id]++;
+  if (id === 'update') return freeze('router');
+  if (id === 'white') log('ok', 'Expert', 'Note: мобильный интернет вернули', 0, '—', '—');
+  expert(id === 'white' ? 'note' : 'chat', pick(EVENTS[id].end), 3);
+}
+function eventTick(dt){
+  if (!S.ev){ if (S.t >= S.nextEv) startEvent(); return; }
+  const e = S.ev;
+  e.left -= dt;
+  e.age += dt;
+  if (e.id === 'white' && !e.bypass){
+    if ((e.wifi === 0 && e.age > 1) || (e.wifi === 1 && e.age > 4.5)){ const l = freeLane(); if (l >= 0){ addEnt('wifi', l); e.wifi++; } }
+    if (e.hopRoll && e.age > 2.6){ const l = freeLane(); if (l >= 0){ addEnt('hop', l); e.hopRoll = false; } }
+  }
+  if (e.left <= 0) endEvent(false);
+}
+
+/* ---------- world ---------- */
+const bandY = () => -40 - Math.round(S.speed * LEAD_S);
+const isBand = e => e.type === 'ban' || e.type === 'bban' || e.type === 'dpi';
+function clearAt(l, y, gap){ return !S.ents.some(e => isBand(e) ? Math.abs(e.y - y) < Math.max(gap, 220) : e.lane === l && Math.abs(e.y - y) < gap); }
+function clearBand(y){ return !S.ents.some(e => Math.abs(e.y - y) < (isBand(e) ? 260 : e.type === 'rst' ? 220 : 50)); }
+function freeLane(){ for (const l of shuffle([0, 1, 2])) if (clearAt(l, -40, 90)) return l; return -1; }
+function addEnt(type, lane){ S.ents.push({type, lane, y:-40, h:type === 'rst' ? 34 : type === 'byte' ? 26 : 30}); }
+function addBan(){
+  const free = ri(HOSTS.length);
+  S.ents.push({type:'ban', lane:-1, y:bandY(), h:BAND_H.ban, hosts:HOSTS.map((_, i) => i).filter(i => i !== free), free, done:false});
+}
+function addDpi(){
+  let gap = ri(3);
+  if (S.ev && S.ev.id === 'sigs') gap = S.ev.gap = (S.ev.gap + 1 + ri(2)) % 3;
+  S.ents.push({type:'dpi', lane:-1, y:bandY(), h:BAND_H.dpi, gap, done:false});
+}
+function carpetRow(){
+  const want = [S.ev.gap, S.ev.gap - 1, S.ev.gap + 1].filter(l => l >= 0 && l < 3);
+  const gap = want.find(l => !S.ents.some(e => e.type === 'rst' && e.lane === l && Math.abs(e.y + 40) < 220));
+  if (gap === undefined || S.ents.some(e => isBand(e) && Math.abs(e.y + 40) < 220)) return false;
+  S.ev.gap = gap;
+  for (let l = 0; l < 3; l++) if (l !== gap) addEnt('rst', l);
+  return true;
+}
+function spawn(){
+  const tr = TR(), st = STAGES[S.stage], diff = Math.min(1, S.t / 150), ev = S.ev ? S.ev.id : '';
+  if (!tr.doomed){
+    if (ev === 'carpet' && S.dist >= S.ev.next) S.ev.next = S.dist + (carpetRow() ? Math.max(200, S.speed * 0.62) : 40);
+    if (ev === 'banwave' && S.dist >= S.ev.next){
+      if (clearBand(bandY())){ addBan(); S.ev.next = S.dist + rand(700, 900); } else S.ev.next = S.dist + 40;
+    }
+    if (ev === 'burned' && !S.ev.spawned && S.ev.age > 0.6 && clearBand(bandY())){
+      S.ev.spawned = true;
+      S.ents.push({type:'bban', lane:-1, y:bandY(), h:BAND_H.bban, bridge:S.ev.bridge, done:false});
+    }
+    if (ev === 'sigs' && S.dist >= S.ev.next){
+      if (clearBand(bandY())){ addDpi(); S.ev.next = S.dist + rand(620, 820); } else S.ev.next = S.dist + 40;
+    }
+    if (ev !== 'carpet' && ev !== 'sigs' && S.dist >= S.nextRst){
+      const lanes = shuffle([0, 1, 2]);
+      const n = Math.random() < (0.15 + 0.4 * diff) * st.rstK ? 2 : 1;
+      for (let i = 0; i < n; i++) if (clearAt(lanes[i], -40, 110)) addEnt('rst', lanes[i]);
+      S.nextRst = S.dist + Math.max(S.speed * 0.6, (rand(300, 460) - 150 * diff) / st.rstK);
+    }
+    const bandsOn = ev !== 'carpet' && ev !== 'banwave' && ev !== 'sigs';
+    if (tr.bans && bandsOn && S.dist >= S.nextBan){
+      if (clearBand(bandY())){ addBan(); S.nextBan = S.dist + rand(...st.ban); }
+      else S.nextBan = S.dist + 50;
+    }
+    if (tr.dpi && bandsOn && S.dist >= S.nextDpi){
+      if (clearBand(bandY())){ addDpi(); S.nextDpi = S.dist + rand(...st.dpi); }
+      else S.nextDpi = S.dist + 50;
+    }
+    if (S.dist >= S.nextSpare){
+      const l = S.spare ? -1 : freeLane();
+      if (l >= 0){ addEnt('spare', l); S.nextSpare = S.dist + rand(11000, 16000); }
+      else S.nextSpare = S.dist + (S.spare ? 3000 : 60);
+    }
+  }
+  if (S.dist >= S.nextByte){
+    const l = ri(3);
+    if (clearAt(l, -40, 80)) addEnt('byte', l);
+    S.nextByte = S.dist + rand(120, 200);
+  }
+}
+function crossBand(e, lane){
+  const tr = TR(), x = laneX(S.x), py = H - PY_OFF;
+  if (S.invuln > 0){ S.bands++; return; }
+  if (e.type === 'bban'){
+    if (S.bridge === e.bridge){ hit('ban', e); return; }
+    S.bands++;
+    float(x, py - 34, 'новый мост', '#2F7D1E');
+    log('ok', 'ТСПУ', `Блок по IP ${BRIDGES[e.bridge].ip} · dst ${bridge().ip} не в списке → PASS`, 0, '—', '—');
+    return;
+  }
+  if (e.type === 'ban'){
+    if (e.hosts.includes(S.host)){ hit('ban', e); return; }
+    S.bands++;
+    float(x, py - 34, 'PASS', '#2F7D1E');
+    log('ok', 'ТСПУ', `Блок по IP ${e.hosts.map(i => HOSTS[i].as).join(', ')} · dst ${host().as} не в списке → PASS`, 0, '—', '—');
+    return;
+  }
+  if (tr.doomed){ hit('wg', e); return; }
+  if (lane !== e.gap){ hit('dpi', e); return; }
+  S.bands++;
+  float(x, py - 34, 'мимо', '#2F7D1E');
+  log('ok', 'ТСПУ', 'DPI: этот поток не досмотрели → PASS', 0, '—', '—');
+}
+function collide(){
+  const pc = laneX(S.x), py = H - PY_OFF, pw = laneW * 0.8, lane = Math.round(S.x);
+  for (const e of S.ents){
+    if (e.gone) continue;
+    if (isBand(e)){
+      if (!e.done && e.y + e.h / 2 >= py - PH / 2){
+        e.done = true;
+        crossBand(e, lane);
+        if (S.mode !== 'play') return;
+      }
+      continue;
+    }
+    const ew = laneW * (e.type === 'rst' ? 0.72 : PICK[e.type].w);
+    if (Math.abs(laneX(e.lane) - pc) < (ew + pw) / 2 - 6 && Math.abs(e.y - py) < (e.h + PH) / 2 - 6){
+      if (e.type === 'rst'){
+        if (e.passed) continue;
+        if (S.invuln > 0){ e.passed = true; continue; }
+        if (hit('rst', e)) return;
+        continue;
+      }
+      e.gone = true;
+      if (e.type === 'byte') pickup(e); else grab(e);
+    }
+  }
+}
+function update(dt){
+  const tr = TR();
+  S.t += dt;
+  stageTick();
+  if (S.handshake > 0){
+    S.handshake -= dt;
+    if (S.handshake <= 0){ S.handshake = 0; connDoneRows(); }
+  }
+  if (S.invuln > 0) S.invuln = Math.max(0, S.invuln - dt);
+  while (S.moveQ.length && S.moveQ[0].at <= S.t) S.lane = clampLane(S.lane + S.moveQ.shift().d);
+  if (tr.doomed){
+    if (S.wg.n < 4 && S.t >= S.wg.next){
+      S.wg.n++;
+      S.wg.next += 0.45;
+      log('udp', 'WireGuard', `Handshake Initiation, sender=0x${S.wg.sender} [повтор]`, 190);
+    }
+  } else eventTick(dt);
+  S.speed = Math.min(440, 230 + S.t * 1.6) * tr.speedK * (S.frozen ? 0.4 : 1);
+  const dy = S.speed * dt;
+  S.dist += dy;
+  S.bgOff += dy;
+  S.x += (S.lane - S.x) * Math.min(1, dt * 22);
+  spawn();
+  for (const e of S.ents) e.y += dy;
+  collide();
+  S.ents = S.ents.filter(e => !e.gone && e.y < H + 60);
+  if (S.mode === 'play' && S.t > S.expertUntil){
+    const pool = JOKES.concat(TR_JOKES[trId], STAGE_JOKES[S.stage], STAGE_JOKES[S.stage]).filter(j => !S.jokesSeen.includes(j));
+    const j = pick(pool.length ? pool : JOKES);
+    S.jokesSeen = S.jokesSeen.concat(j).slice(-8);
+    expert('chat', j, 7);
+  }
+}
+function updateFx(dt){
+  for (const f of S.floats){ f.y -= 46 * dt; f.life -= dt * 1.4; }
+  S.floats = S.floats.filter(f => f.life > 0);
+  for (const p of S.parts){ p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 520 * dt; p.life -= dt * 0.8; p.rot += p.vr * dt; }
+  S.parts = S.parts.filter(p => p.life > 0);
+}
+
+/* ---------- drawing ---------- */
+function rr(x, y, w, h, r){
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(x, y, w, h, r); else ctx.rect(x, y, w, h);
+}
+function fitFont(txt, max, fs, wt){
+  ctx.font = `${wt} ${fs}px ${MONO}`;
+  while (ctx.measureText(txt).width > max && fs > 8){ fs--; ctx.font = `${wt} ${fs}px ${MONO}`; }
+}
+function hash(n){
+  n = (n ^ 61) ^ (n >>> 16); n = n + (n << 3); n = n ^ (n >>> 4);
+  n = Math.imul(n, 0x27d4eb2d); n = n ^ (n >>> 15);
+  return n >>> 0;
+}
+const playerColor = () => trId === 'reality' ? host().color : TR().color;
+const ROW = 22;
+function drawBg(){
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(0, 0, W, H);
+  const off = S.bgOff % ROW, baseId = Math.floor(S.bgOff / ROW);
+  ctx.font = `10px ${MONO}`;
+  ctx.textAlign = 'left';
+  for (let i = -1; i <= Math.ceil(H / ROW); i++){
+    const id = baseId - i, y = i * ROW + off, k = hash(id) % 8;
+    ctx.globalAlpha = 0.3;
+    ctx.fillStyle = BG_COL[k];
+    ctx.fillRect(0, y, W, ROW - 1);
+    ctx.globalAlpha = 0.26;
+    ctx.fillStyle = '#3A3F4B';
+    ctx.fillText(`${((id % 100000) + 100000) % 100000}  ${BG_PROTO[k]}  ${BG_INFO[k]}`, 8, y + ROW / 2);
+  }
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = '#C3C8D3';
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([6, 8]);
+  ctx.lineDashOffset = -(S.bgOff % 14);
+  for (let l = 1; l < 3; l++){
+    const x = Math.round(laneW * l) + 0.5;
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+  }
+  ctx.setLineDash([]);
+}
+function drawTspuTag(y, h, cy){
+  ctx.fillStyle = '#12272E'; rr(6, y + 6, 46, h - 12, 3); ctx.fill();
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#F78787'; ctx.font = `700 10px ${MONO}`;
+  ctx.fillText('ТСПУ', 29, cy - 7);
+  ctx.fillText('IP', 29, cy + 8);
+}
+/* The wall is solid: what matters is not your lane but which hosting your server is on. Red if your hosting is banned, green if you pass */
+function drawBan(g){
+  const y = g.y - g.h / 2, live = S.mode === 'play' && !g.done, mine = HOSTS[S.host], free = HOSTS[g.free];
+  const bad = live && g.hosts.includes(S.host), ok = live && !bad;
+  ctx.fillStyle = bad ? '#12272E' : ok ? '#C9F7C0' : '#FFE8E0'; ctx.fillRect(0, y, W, g.h);
+  const sw = W / g.hosts.length;
+  g.hosts.forEach((i, k) => { ctx.fillStyle = HOSTS[i].color; ctx.fillRect(k * sw, y, sw + 1, 4); ctx.fillRect(k * sw, y + g.h - 4, sw + 1, 4); });
+  if (bad){ ctx.strokeStyle = '#E04848'; ctx.lineWidth = 3; ctx.strokeRect(1.5, y + 5.5, W - 3, g.h - 11); }
+  ctx.fillStyle = bad ? '#F78787' : '#12272E'; rr(8, y + 10, 44, g.h - 20, 3); ctx.fill();
+  ctx.textAlign = 'center';
+  ctx.fillStyle = bad ? '#12272E' : '#F78787'; ctx.font = `700 10px ${MONO}`;
+  ctx.fillText('ТСПУ', 30, g.y - 7);
+  ctx.fillText('IP', 30, g.y + 8);
+  const cx = (W + 60) / 2, mw = W - 70;
+  const t1 = 'бан: ' + g.hosts.map(i => HOSTS[i].short).join(' и ');
+  const t2 = bad ? `ты на ${mine.short} · жми ↑ → ${free.short}` : ok ? `ты на ${mine.short} · проходишь` : `свободен только ${free.short}`;
+  fitFont(t1, mw, 14, 700);
+  ctx.fillStyle = bad ? '#F78787' : ok ? '#1F5A12' : '#8E2440';
+  ctx.fillText(t1, cx, g.y - 6);
+  fitFont(t2, mw, 11, 600);
+  ctx.fillStyle = bad ? '#FFFFFF' : ok ? '#2F7D1E' : '#3D4250';
+  ctx.fillText(t2, cx, g.y + 13);
+}
+function drawBridgeBan(g){
+  const y = g.y - g.h / 2, safe = S.bridge !== g.bridge;
+  ctx.fillStyle = '#FFE8E0'; ctx.fillRect(0, y, W, g.h);
+  drawTspuTag(y, g.h, g.y);
+  const x0 = 58, w = W - x0 - 6;
+  ctx.fillStyle = safe ? '#C9F7C0' : '#12272E'; rr(x0, y + 6, w, g.h - 12, 3); ctx.fill();
+  if (S.mode === 'play' && !g.done && !safe){ ctx.strokeStyle = '#E04848'; ctx.lineWidth = 3; rr(x0 - 2, y + 3, w + 4, g.h - 6, 5); ctx.stroke(); }
+  ctx.textAlign = 'center';
+  const t1 = `× мост ${BRIDGES[g.bridge].ip}`, t2 = safe ? 'ты уже на новом мосту' : 'ты на нём · жми ↑ за новым';
+  fitFont(t1, w - 10, 14, 700);
+  ctx.fillStyle = safe ? '#1F5A12' : '#F78787';
+  ctx.fillText(t1, x0 + w / 2, g.y - 5);
+  fitFont(t2, w - 10, 10, 600);
+  ctx.fillStyle = safe ? '#3D6E1C' : '#C9A0A0';
+  ctx.fillText(t2, x0 + w / 2, g.y + 12);
+}
+function drawDpi(d){
+  const y = d.y - d.h / 2, label = TR().doomed ? 'WireGuard?' : 'DPI: шум?';
+  ctx.textAlign = 'center';
+  for (let l = 0; l < 3; l++){
+    const x0 = Math.round(laneW * l) + 2, w = Math.round(laneW) - 4, cx = laneX(l);
+    if (l === d.gap){
+      ctx.fillStyle = 'rgba(175,255,175,0.6)'; rr(x0, y, w, d.h, 3); ctx.fill();
+      ctx.strokeStyle = '#6DAA3C'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = '#2C4A2C'; ctx.font = `700 12px ${MONO}`; ctx.fillText('проход', cx, d.y + 1);
+      continue;
+    }
+    ctx.fillStyle = '#12272E'; rr(x0, y, w, d.h, 3); ctx.fill();
+    ctx.fillStyle = '#F78787';
+    fitFont(label, w - 8, 13, 700);
+    ctx.fillText(label, cx, d.y + 1);
+  }
+}
+/* Warning about the nearest TSPU lane while it is still above the top edge of the field */
+const SIDE = ['слева', 'по центру', 'справа'];
+function drawAhead(){
+  if (S.mode !== 'play') return;
+  const e = S.ents.filter(x => isBand(x) && !x.done && x.y + x.h / 2 < 34).sort((a, b) => b.y - a.y)[0];
+  if (!e) return;
+  const eta = Math.max(0, (H - PY_OFF - PH / 2 - e.y - e.h / 2) / Math.max(1, S.speed));
+  const t = comma(eta.toFixed(1)) + ' с';
+  let txt, bad;
+  if (e.type === 'ban'){
+    bad = e.hosts.includes(S.host);
+    txt = `▼ бан по IP через ${t} · свободен ${HOSTS[e.free].short}`;
+  } else if (e.type === 'bban'){
+    bad = S.bridge === e.bridge;
+    txt = bad ? `▼ бан моста через ${t} · жми ↑` : `▼ бан старого моста через ${t}`;
+  } else {
+    bad = TR().doomed || S.moveQ.reduce((l, q) => clampLane(l + q.d), S.lane) !== e.gap;
+    txt = TR().doomed ? `▼ сигнатура WireGuard через ${t}` : `▼ сканер через ${t} · проход ${SIDE[e.gap]}`;
+  }
+  fitFont(txt, W - 24, 12, 700);
+  const w = ctx.measureText(txt).width + 20, y = 72;
+  ctx.fillStyle = bad ? '#12272E' : '#E4FFC7'; rr((W - w) / 2, y, w, 24, 4); ctx.fill();
+  ctx.strokeStyle = bad ? '#E04848' : '#6DAA3C'; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.textAlign = 'center';
+  ctx.fillStyle = bad ? '#F78787' : '#1F5A12';
+  ctx.fillText(txt, W / 2, y + 12.5);
+}
+function drawEnt(e){
+  if (e.type === 'ban') return drawBan(e);
+  if (e.type === 'bban') return drawBridgeBan(e);
+  if (e.type === 'dpi') return drawDpi(e);
+  const cx = laneX(e.lane), h = e.h, y = e.y - h / 2;
+  ctx.textAlign = 'center';
+  if (e.type === 'rst'){
+    const w = laneW * 0.72;
+    ctx.fillStyle = '#12272E'; rr(cx - w / 2, y, w, h, 4); ctx.fill();
+    ctx.fillStyle = '#F78787'; ctx.font = `700 12px ${MONO}`; ctx.fillText('RST, ACK', cx, e.y + 1);
+    return;
+  }
+  const p = PICK[e.type], w = laneW * p.w;
+  const dead = e.type === 'byte' && S.mode === 'play' && !!deadWhy();
+  ctx.fillStyle = dead ? '#EEF1F5' : p.fill; rr(cx - w / 2, y, w, h, 4); ctx.fill();
+  ctx.strokeStyle = dead ? '#A8B0BD' : p.stroke; ctx.lineWidth = e.type === 'byte' ? 1.5 : 2; ctx.stroke();
+  ctx.fillStyle = dead ? '#7D8796' : p.ink;
+  ctx.font = `${e.type === 'byte' ? 600 : 700} 11px ${MONO}`;
+  ctx.fillText(e.type === 'byte' ? TR().seg + ' Б' : p.label, cx, e.y + 1);
+}
+function drawPlayer(){
+  if (S.mode === 'over') return;
+  const tr = TR(), pw = laneW * 0.8, cy = H - PY_OFF;
+  if (S.moveQ.length){
+    const tgt = S.moveQ.reduce((l, q) => clampLane(l + q.d), S.lane);
+    if (tgt !== S.lane){
+      ctx.strokeStyle = 'rgba(89,49,107,0.55)'; ctx.lineWidth = 1.5; ctx.setLineDash([4, 4]);
+      rr(laneX(tgt) - pw / 2, cy - PH / 2, pw, PH, 7); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+  const cx = laneX(S.x);
+  ctx.globalAlpha = S.invuln > 0 && !REDUCED && Math.floor(S.t * 10) % 2 === 0 ? 0.45 : 1;
+  ctx.fillStyle = playerColor();
+  rr(cx - pw / 2, cy - PH / 2, pw, PH, 7); ctx.fill();
+  ctx.globalAlpha = 1;
+  if (S.handshake > 0 || tr.doomed || S.invuln > 0){
+    ctx.strokeStyle = S.invuln > 0 ? '#B04FC4' : '#12272E'; ctx.lineWidth = 2; ctx.setLineDash([4, 4]);
+    rr(cx - pw / 2 - 3, cy - PH / 2 - 3, pw + 6, PH + 6, 9); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  const label = tr.doomed ? 'WireGuard' : trId === 'reality' ? host().short : S.handshake > 0 ? 'цепочка…' : 'obfs4';
+  fitFont(label, pw - 12, 13, 700);
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillText(label, cx, cy + 1);
+  ctx.fillStyle = '#5F6470';
+  const sub = tr.doomed ? '51820/udp' : trId === 'tor' ? `мост .${bridge().ip.split('.')[3]} · ${S.port}` : S.handshake > 0 ? 'рукопожатие…' : `${host().cc} · ${S.port}`;
+  fitFont(sub, laneW - 4, 10, 400);
+  ctx.fillText(sub, cx, cy + PH / 2 + 12);
+}
+function drawState(now){
+  if (S.mode !== 'play') return;
+  const blink = REDUCED || Math.floor(now / 400) % 2 === 0;
+  let txt = '', ink = '#1D4F86';
+  if (S.frozen){
+    ctx.fillStyle = 'rgba(150,200,245,0.30)'; ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = 'rgba(80,150,220,0.55)'; ctx.lineWidth = 6; ctx.strokeRect(3, 3, W - 6, H - 6);
+    txt = FREEZE[S.frozeWhy].canvas;
+  } else if (S.ev && S.ev.id === 'white' && !S.ev.bypass){
+    ctx.fillStyle = 'rgba(95,100,112,0.16)'; ctx.fillRect(0, 0, W, H);
+    txt = 'ТОЛЬКО БЕЛЫЙ СПИСОК · лови Wi-Fi'; ink = '#2F3440';
+  } else if (S.ev && S.ev.id === 'update'){
+    ctx.fillStyle = 'rgba(18,39,46,0.14)'; ctx.fillRect(0, 0, W, H);
+    txt = 'Роутер ставит обновление…'; ink = '#12272E';
+  }
+  ctx.textAlign = 'center';
+  if (txt && blink){ fitFont(txt, W - 24, 16, 800); ctx.fillStyle = ink; ctx.fillText(txt, W / 2, H * 0.42); }
+  let bt = '', bc = '#1679A7';
+  if (S.banner && S.t < S.banner.until) bt = S.banner.txt;
+  else if (S.ev){
+    const m = EVENTS[S.ev.id];
+    bt = m.title + (S.ev.bypass ? ' · хоп держит' : '') + ' · ' + Math.ceil(S.ev.left) + ' с';
+    bc = m.col;
+  }
+  if (bt){
+    fitFont(bt, W - 40, 11, 700);
+    const w = ctx.measureText(bt).width + 20;
+    ctx.fillStyle = bc; rr((W - w) / 2, 42, w, 22, 11); ctx.fill();
+    ctx.fillStyle = '#FFFFFF'; ctx.fillText(bt, W / 2, 53.5);
+  }
+}
+function drawFx(){
+  ctx.textAlign = 'center';
+  for (const f of S.floats){
+    ctx.globalAlpha = Math.max(0, f.life);
+    ctx.fillStyle = f.color; ctx.font = `700 12px ${MONO}`;
+    ctx.fillText(f.txt, f.x, f.y);
+  }
+  for (const p of S.parts){
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, p.life);
+    ctx.translate(p.x, p.y); ctx.rotate(p.rot);
+    ctx.fillStyle = p.color; ctx.font = `700 13px ${MONO}`;
+    ctx.fillText(p.txt, 0, 0);
+    ctx.restore();
+  }
+  ctx.globalAlpha = 1;
+}
+function render(now){
+  ctx.textBaseline = 'middle';
+  drawBg();
+  for (const e of S.ents) drawEnt(e);
+  drawPlayer();
+  drawFx();
+  drawAhead();
+  drawState(now);
+}
+
+/* ---------- loop, sizing, input ---------- */
+function resize(){
+  const r = stage.getBoundingClientRect();
+  W = Math.max(200, Math.round(r.width));
+  H = Math.max(300, Math.round(r.height));
+  dpr = Math.min(2, window.devicePixelRatio || 1);
+  cv.width = Math.round(W * dpr);
+  cv.height = Math.round(H * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  laneW = W / 3;
+}
+function seedAttract(){
+  const band = trId === 'reality'
+    ? {type:'ban', lane:-1, y:Math.round(H * 0.24), h:BAND_H.ban, hosts:[0, 2], free:1, done:true}
+    : {type:'dpi', lane:-1, y:Math.round(H * 0.24), h:BAND_H.dpi, gap:trId === 'wg' ? -1 : 1, done:true};
+  S.ents = [
+    band,
+    {type:'rst', lane:0, y:Math.round(H * 0.42), h:34},
+    {type:'byte', lane:2, y:Math.round(H * 0.48), h:26},
+    {type:'spare', lane:1, y:Math.round(H * 0.64), h:30},
+  ];
+}
+let last = performance.now();
+function frame(now){
+  const dt = Math.min(0.033, Math.max(0, (now - last) / 1000));
+  last = now;
+  if (S.mode === 'play') update(dt);
+  else if (S.mode === 'title' && !REDUCED) S.bgOff += 30 * dt;
+  if (S.mode !== 'pause') updateFx(dt);
+  render(now);
+  updateHud();
+  requestAnimationFrame(frame);
+}
+
+const DIGITS = {Digit1:0, Digit2:1, Digit3:2, Numpad1:0, Numpad2:1, Numpad3:2};
+const GAME_KEYS = ['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Space','KeyA','KeyD','KeyW','KeyS','KeyR','KeyP','KeyT','Escape','Enter'].concat(Object.keys(DIGITS));
+addEventListener('keydown', e => {
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const c = e.code;
+  if (!GAME_KEYS.includes(c)) return;
+  const btn = e.target instanceof HTMLButtonElement ? e.target : null;
+  const confirm = c === 'Enter' || c === 'Space';
+  if (S.mode !== 'play' && confirm && btn && !btn.classList.contains('pick')) return;
+  e.preventDefault();
+  if (e.repeat) return;
+  if (S.mode === 'play'){
+    if (c === 'ArrowLeft' || c === 'KeyA') move(-1);
+    else if (c === 'ArrowRight' || c === 'KeyD') move(1);
+    else if (c === 'ArrowUp' || c === 'KeyW' || c === 'Space') switchHost(1);
+    else if (c === 'ArrowDown' || c === 'KeyS') switchHost(-1);
+    else if (c === 'KeyR') reconnect();
+    else if (c === 'KeyP' || c === 'Escape') pause();
+  } else if (S.mode === 'pause'){
+    if (c === 'KeyP' || c === 'Escape' || confirm) resume();
+  } else if (c in DIGITS){
+    setTr(TR_ORDER[DIGITS[c]]);
+  } else if (S.mode === 'title'){
+    if (c === 'ArrowLeft' || c === 'ArrowUp') cycleTr(-1);
+    else if (c === 'ArrowRight' || c === 'ArrowDown') cycleTr(1);
+    else if (btn && c === 'Space') setTr(btn.dataset.tr);
+    else if (confirm){ if (btn) setTr(btn.dataset.tr); start(); }
+  } else if (S.mode === 'over'){
+    if (confirm) start();
+    else if (c === 'KeyT' || c === 'Escape') toTitle();
+  }
+});
+
+let swipe = null;
+cv.addEventListener('pointerdown', e => { swipe = {x:e.clientX, y:e.clientY}; });
+cv.addEventListener('pointerup', e => {
+  if (!swipe) return;
+  const dx = e.clientX - swipe.x, dy = e.clientY - swipe.y;
+  swipe = null;
+  if (S.mode !== 'play') return;
+  if (Math.abs(dx) > 28 && Math.abs(dx) > Math.abs(dy)) move(dx > 0 ? 1 : -1);
+  else if (Math.abs(dy) < 28) switchHost(1);
+});
+cv.addEventListener('pointercancel', () => { swipe = null; });
+
+function bind(id, fn){
+  const b = $(id);
+  b.addEventListener('pointerdown', e => { e.preventDefault(); fn(); });
+  b.addEventListener('click', e => { if (e.detail === 0) fn(); });
+}
+bind('btnLeft', () => move(-1));
+bind('btnRight', () => move(1));
+bind('btnSni', () => switchHost(1));
+bind('btnRe', reconnect);
+for (const b of document.querySelectorAll('.pick')) b.addEventListener('click', () => setTr(b.dataset.tr));
+$('btnStart').addEventListener('click', start);
+$('btnAgain').addEventListener('click', start);
+$('btnPick').addEventListener('click', toTitle);
+$('btnResume').addEventListener('click', resume);
+document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
+
+if (window.ResizeObserver) new ResizeObserver(() => { resize(); if (S.mode === 'title') seedAttract(); }).observe(stage);
+else addEventListener('resize', resize);
+
+resize();
+seedAttract();
+log('arp', 'ARP', `Who has ${ROUTER}? Tell ${HOME_IP}`, 42, 'Intel_5e:0a:11', 'Broadcast');
+log('arp', 'ARP', `${ROUTER} is at 50:ff:20:3c:21:9a`, 60, 'TP-Link_3c:21:9a', 'Intel_5e:0a:11');
+log('udp', 'DNS', 'Standard query 0x7f3a A youtube.com', 71, HOME_IP, ROUTER);
+log('udp', 'DNS', 'Standard query response 0x7f3a A youtube.com A 142.250.74.46', 87, ROUTER, HOME_IP);
+log('ok', 'Expert', 'Note: адрес есть. Дороги нет.', 0, '—', '—');
+renderPicks(); updateFilter(); renderHex(); updateStatus(); updateControls(); showBests();
+expert('chat', 'Готов к захвату на wlan0. Интерфейс поднят, надежда тоже.', 1e9);
+showDialog('dlgTitle', false);
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
