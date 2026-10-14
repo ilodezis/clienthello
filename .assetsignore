@@ -1,0 +1,10 @@
+.git
+.gitignore
+.assetsignore
+wrangler.jsonc
+README.md
+AGENTS.md
+CLAUDE.md
+.impeccable
+node_modules
+.wrangler
